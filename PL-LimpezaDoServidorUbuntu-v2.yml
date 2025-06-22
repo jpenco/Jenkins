@@ -1,19 +1,19 @@
 pipeline {
     agent any
     parameters {
-        choice(name: 'LOG_RETENTION', 
+        choice(name: 'RETENCAO', 
               choices: ['1d', '2d', '7d'], 
               description: 'Período de retenção de logs')
-        booleanParam(name: 'CLEAN_DOCKER', 
+        booleanParam(name: 'LIMPA_DOCKER', 
                     defaultValue: false, 
                     description: 'Executar limpeza do Docker?')
-        booleanParam(name: 'CLEAN_THUMBNAILS', 
+        booleanParam(name: 'LIMPA_MINIATURAS', 
                     defaultValue: true, 
                     description: 'Limpar cache de thumbnails?')
     }
     
     options {
-        timeout(time: 30, unit: 'MINUTES')
+        timeout(time: 5, unit: 'MINUTES')
         disableConcurrentBuilds()
     }
     
@@ -61,13 +61,13 @@ pipeline {
                             # Logs (com tratamento de erro)
                             sudo find /var/log -type f -name "*.log" -size +1M -not -path '*/jenkins*' -exec truncate -s 0 {} \\; || true
                             sudo find /var/log -type f -name "*.gz" -not -path '*/jenkins*' -delete || true
-                            sudo journalctl --vacuum-time=${params.LOG_RETENTION} || echo "Journalctl falhou (pode ser normal em alguns sistemas)"
+                            sudo journalctl --vacuum-time=${params.RETENCAO} || echo "Journalctl falhou (pode ser normal em alguns sistemas)"
                             
                             # Cache
                             sudo find /var/cache -mindepth 1 -not -path '*/jenkins*' -exec rm -rf {} + || true
                         """
                         
-                        if (params.CLEAN_THUMBNAILS.toBoolean()) {
+                        if (params.LIMPA_MINIATURAS.toBoolean()) {
                             sh '''
                                 echo "Limpando thumbnails..."
                                 sudo find /home -type d -name '.thumbnails' -not -user jenkins -exec rm -rf {} + || true
@@ -75,7 +75,7 @@ pipeline {
                             '''
                         }
                         
-                        if (params.CLEAN_DOCKER.toBoolean() && 
+                        if (params.LIMPA_DOCKER.toBoolean() && 
                             sh(script: 'command -v docker', returnStatus: true) == 0) {
                             sh '''
                                 echo "Limpando Docker..."
