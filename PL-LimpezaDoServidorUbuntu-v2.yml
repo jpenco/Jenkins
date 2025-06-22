@@ -1,0 +1,154 @@
+pipeline {
+    agent any
+    parameters {
+        choice(name: 'LOG_RETENTION', 
+              choices: ['1d', '2d', '7d'], 
+              description: 'Período de retenção de logs')
+        booleanParam(name: 'CLEAN_DOCKER', 
+                    defaultValue: false, 
+                    description: 'Executar limpeza do Docker?')
+        booleanParam(name: 'CLEAN_THUMBNAILS', 
+                    defaultValue: true, 
+                    description: 'Limpar cache de thumbnails?')
+    }
+    
+    options {
+        timeout(time: 30, unit: 'MINUTES')
+        disableConcurrentBuilds()
+    }
+    
+    stages {
+        stage('Verificação Inicial') {
+            steps {
+                script {
+                    if (!fileExists('/etc/lsb-release')) {
+                        error "Este pipeline é específico para Ubuntu/Debian"
+                    }
+                    
+                    env.JENKINS_PROTECTED_DIRS = "/var/lib/jenkins /etc/jenkins /usr/share/jenkins"
+                    
+                    echo "=== ESTADO INICIAL ==="
+                    sh '''
+                        echo "\nEspaço em disco:"
+                        df -h /
+                        echo "\nTop 5 diretórios em /var (exceto Jenkins):"
+                        sudo du -sh /var/* 2>/dev/null | grep -v jenkins | sort -rh | head -5
+                    '''
+                    
+                    env.INITIAL_SPACE = sh(
+                        script: "df / --output=used | tail -1",
+                        returnStdout: true
+                    ).trim()
+                }
+            }
+        }
+        
+        stage('Limpeza do Sistema') {
+            steps {
+                script {
+                    echo "Iniciando limpeza do sistema (protegendo Jenkins)..."
+                    
+                    try {
+                        sh """
+                            # Limpeza básica
+                            sudo apt-get clean
+                            sudo apt-get autoclean
+                            
+                            # Arquivos temporários
+                            sudo find /tmp -mindepth 1 -not -path '*/jenkins*' -exec rm -rf {} +
+                            sudo find /var/tmp -mindepth 1 -not -path '*/jenkins*' -exec rm -rf {} +
+                            
+                            # Logs (com tratamento de erro)
+                            sudo find /var/log -type f -name "*.log" -size +1M -not -path '*/jenkins*' -exec truncate -s 0 {} \\; || true
+                            sudo find /var/log -type f -name "*.gz" -not -path '*/jenkins*' -delete || true
+                            sudo journalctl --vacuum-time=${params.LOG_RETENTION} || echo "Journalctl falhou (pode ser normal em alguns sistemas)"
+                            
+                            # Cache
+                            sudo find /var/cache -mindepth 1 -not -path '*/jenkins*' -exec rm -rf {} + || true
+                        """
+                        
+                        if (params.CLEAN_THUMBNAILS.toBoolean()) {
+                            sh '''
+                                echo "Limpando thumbnails..."
+                                sudo find /home -type d -name '.thumbnails' -not -user jenkins -exec rm -rf {} + || true
+                                sudo rm -rf /root/.thumbnails || true
+                            '''
+                        }
+                        
+                        if (params.CLEAN_DOCKER.toBoolean() && 
+                            sh(script: 'command -v docker', returnStatus: true) == 0) {
+                            sh '''
+                                echo "Limpando Docker..."
+                                sudo docker system prune -f --filter "label!=com.cloudbees.jenkins" || true
+                            '''
+                        }
+                    } catch (e) {
+                        echo "Erro durante limpeza: ${e.message}"
+                        currentBuild.result = 'UNSTABLE'
+                    }
+                }
+            }
+        }
+        
+        stage('Limpeza de Kernels Antigos') {
+            steps {
+                script {
+                    try {
+                        sh '''
+                            echo "Removendo kernels antigos..."
+                            current_kernel=$(uname -r)
+                            sudo apt-get purge -y $(dpkg -l | awk '/^ii linux-image-*/{print $2}' | \\
+                                grep -v "$current_kernel" | grep -v $(uname -r | cut -d'-' -f1)) || \\
+                                echo "Alguns kernels não puderam ser removidos"
+                        '''
+                    } catch (e) {
+                        echo "Erro na limpeza de kernels: ${e.message}"
+                        currentBuild.result = 'UNSTABLE'
+                    }
+                }
+            }
+        }
+        
+        stage('Pós-Verificação') {
+            steps {
+                script {
+                    echo "=== ESTADO FINAL ==="
+                    sh """
+                        echo "\nEspaço em disco:"
+                        df -h /
+                        echo "\nTop 5 diretórios em /var (exceto Jenkins):"
+                        sudo du -sh /var/* 2>/dev/null | grep -v jenkins | sort -rh | head -5
+                    """
+                    
+                    try {
+                        def current_space = sh(
+                            script: "df / --output=used | tail -1",
+                            returnStdout: true
+                        ).trim()
+                        
+                        env.FREED_SPACE_MB = sh(
+                            script: "echo \$(( (${env.INITIAL_SPACE} - ${current_space}) / 1024 ))",
+                            returnStdout: true
+                        ).trim()
+                    } catch (e) {
+                        echo "Erro ao calcular espaço liberado: ${e.message}"
+                        env.FREED_SPACE_MB = "N/A"
+                        currentBuild.result = 'UNSTABLE'
+                    }
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            echo "=== RESUMO DA LIMPEZA ==="
+            echo "Espaço inicial: ${env.INITIAL_SPACE} KB"
+            echo "Espaço liberado: ${env.FREED_SPACE_MB} MB"
+            echo "Diretórios protegidos: ${env.JENKINS_PROTECTED_DIRS}"
+        }
+        cleanup {
+            echo "Cleanup concluído (workspace preservado)"
+        }
+    }
+}
