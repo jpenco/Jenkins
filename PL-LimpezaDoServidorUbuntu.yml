@@ -1,0 +1,50 @@
+	pipeline {
+    agent any
+    stages {
+        stage('Verificar Espaço Antes da Limpeza') {
+            steps {
+                script {
+                    // Captura o espaço em disco antes da limpeza
+                    def beforeCleanup = sh(script: 'sudo du -sh /tmp /var/tmp', returnStdout: true).trim()
+                    echo "Espaço ocupado antes da limpeza:\n${beforeCleanup}"
+                }
+            }
+        }
+        stage('Limpeza de Cache e Temporários') {
+            steps {
+                script {
+                    echo "Iniciando limpeza de arquivos temporários..."
+                    sh '''
+                        # Limpeza de arquivos temporários
+                        sudo rm -rf /tmp/*
+                        sudo rm -rf /var/tmp/*
+                        
+                        # Limpeza de cache do apt (para sistemas Debian/Ubuntu)
+                        sudo apt-get clean
+                        
+                        # Limpeza de logs antigos do systemd
+                        sudo journalctl --vacuum-time=2d
+                    '''
+                }
+            }
+        }
+        stage('Verificar Espaço Após Limpeza') {
+            steps {
+                script {
+                    // Captura o espaço em disco após a limpeza
+                    def afterCleanup = sh(script: 'sudo du -sh /tmp /var/tmp', returnStdout: true).trim()
+                    echo "Espaço ocupado após a limpeza:\n${afterCleanup}"
+                    
+                    // Calcula o espaço liberado
+                    def spaceFreed = sh(script: 'sudo du -shc /tmp /var/tmp | grep total | awk \'{print $1}\'', returnStdout: true).trim()
+                    echo "Espaço liberado:\n${spaceFreed}"
+                }
+            }
+        }
+    }
+    post {
+        always {
+            echo 'Pipeline concluído.'
+        }
+    }
+}
