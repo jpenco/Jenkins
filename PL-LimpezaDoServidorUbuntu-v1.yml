@@ -1,4 +1,4 @@
-	pipeline {
+pipeline {
     agent any
     stages {
         stage('Verificar Espaço Antes da Limpeza') {
