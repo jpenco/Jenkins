@@ -1,0 +1,41 @@
+pipeline {
+    agent any
+
+    stages {
+        stage('Monitoramento do Servidor') {
+            steps {
+                script {
+                    echo "=== INFORMAÇÕES DO SERVIDOR ==="
+                    
+                    // Uptime em dias e horas
+                    def uptime = sh(script: "uptime -p | sed 's/up //'", returnStdout: true).trim()
+                    echo "🕒 Uptime: ${uptime}"
+                    
+                    // Quantidade de processadores
+                    def processors = sh(script: "nproc", returnStdout: true).trim()
+                    echo "⚙️ Processadores: ${processors} núcleos"
+                    
+                    // Memória RAM (uso e total)
+                    sh '''
+                        echo "🧠 Memória RAM:"
+                        free -h | awk '/Mem:/ {printf "Total: %s, Usada: %s (%.1f%%)\\n", $2, $3, $3/$2*100}'
+                    '''
+                    
+                    // Espaço em disco (uso e total)
+                    sh '''
+                        echo "💾 Espaço em Disco:"
+                        df -h --total | grep total | awk '{printf "Total: %s, Usado: %s (%.1f%%)\\n", $2, $3, $3/$2*100}'
+                    '''
+                    
+                    echo "============================"
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            echo "✅ Monitoramento concluído com sucesso"
+        }
+    }
+}
