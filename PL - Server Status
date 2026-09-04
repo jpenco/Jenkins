@@ -1,39 +1,44 @@
 pipeline {
     agent any 
     stages {
-        stage('Monitoramento do Servidor') {
+        stage('Coletar Métricas do Servidor') {
             steps {
                 script {
-                    echo "=== INFORMAÇÕES DO SERVIDOR ==="
+                    // 1. Captura o Uptime
+                    env.SERVER_UPTIME = sh(script: "uptime -p | sed 's/up //'", returnStdout: true).trim()
                     
-                    // Uptime em dias e horas
-                    def uptime = sh(script: "uptime -p | sed 's/up //'", returnStdout: true).trim()
-                    echo "🕒 Uptime: ${uptime}"
+                    // 2. Captura a Quantidade de Processadores
+                    env.SERVER_CPUS = sh(script: "nproc", returnStdout: true).trim()
                     
-                    // Quantidade de processadores
-                    def processors = sh(script: "nproc", returnStdout: true).trim()
-                    echo "⚙️ Processadores: ${processors} núcleos"
+                    // 3. Captura os dados da Memória RAM (Cálculo e formatação via awk)
+                    env.SERVER_RAM = sh(
+                        script: "free -m | awk '/Mem:/ {printf \"Total: %.1f GB, Usada: %.1f GB (%.1f%%)\", \$2/1024, \$3/1024, \$3/\$2*100}'",
+                        returnStdout: true
+                    ).trim()
                     
-                    // Memória RAM (uso e total) - Corrigido escape e cálculo em Megabytes
-                    sh '''
-                        echo "🧠 Memória RAM:"
-                        free -m | awk '/Mem:/ {printf "Total: %.1f GB, Usada: %.1f GB (%.1f%%)\\n", \$2/1024, \$3/1024, \$3/\$2*100}'
-                    '''
-                    
-                    // Espaço em disco (uso e total) - Corrigido escape e cálculo em Kilobytes
-                    sh '''
-                        echo "💾 Espaço em Disco (Raiz /):"
-                        df -k / | awk 'NR==2 {printf "Total: %.1f GB, Usado: %.1f GB (%.1f%%)\\n", \$2/1024/1024, \$3/1024/1024, \$3/\$2*100}'
-                    '''
-                    
-                    echo "============================"
+                    // 4. Captura os dados do Espaço em Disco (Cálculo focado na Raiz /)
+                    env.SERVER_DISK = sh(
+                        script: "df -k / | awk 'NR==2 {printf \"Total: %.1f GB, Usado: %.1f GB (%.1f%%)\", \$2/1024/1024, \$3/1024/1024, \$3/\$2*100}'",
+                        returnStdout: true
+                    ).trim()
                 }
             }
         }
     }
     post {
         always {
-            echo "✅ Monitoramento concluído com sucesso"
+            // Bloco de saída única consolidando todas as informações coletadas
+            echo """
+========================================
+       📊 RELATÓRIO DO SERVIDOR
+========================================
+🕒 Uptime: ${env.SERVER_UPTIME}
+⚙️ Processadores: ${env.SERVER_CPUS} núcleos
+🧠 Memória RAM: ${env.SERVER_RAM}
+💾 Espaço em Disco (Raiz /): ${env.SERVER_DISK}
+========================================
+✅ Monitoramento concluído com sucesso.
+"""
         }
     }
 }
