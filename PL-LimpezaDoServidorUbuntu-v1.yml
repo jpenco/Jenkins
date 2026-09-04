@@ -1,25 +1,28 @@
 pipeline {
     agent any
     stages {
-        stage('Verificar Espaço Antes da Limpeza') {
+        stage('Verificar Espaço Antes') {
             steps {
                 script {
-                    // Captura o espaço em disco antes da limpeza
-                    def beforeCleanup = sh(script: 'sudo du -sh /tmp /var/tmp', returnStdout: true).trim()
-                    echo "Espaço ocupado antes da limpeza:\n${beforeCleanup}"
+                    // Armazena o tamanho em formato numérico (Kbytes) para podermos calcular a diferença depois
+                    // Removemos o 'sudo' assumindo que as permissões do diretório permitem leitura, ou que o sudoers está configurado
+                    env.BEFORE_KB = sh(script: "sudo du -sk /tmp /var/tmp | awk '{total+=\$1} END {print total}'", returnStdout: true).trim()
+                    
+                    def beforeHuman = sh(script: 'sudo du -sh /tmp /var/tmp', returnStdout: true).trim()
+                    echo "Espaço ocupado antes da limpeza:\n${beforeHuman}"
                 }
             }
         }
         stage('Limpeza de Cache e Temporários') {
             steps {
                 script {
-                    echo "Iniciando limpeza de arquivos temporários..."
+                    echo "Iniciando limpeza segura de arquivos temporários..."
                     sh '''
-                        # Limpeza de arquivos temporários
-                        sudo rm -rf /tmp/*
-                        sudo rm -rf /var/tmp/*
+                        # Remove apenas arquivos que não mudam há mais de 1 dia (mais seguro que rm -rf /*)
+                        sudo find /tmp -type f -mtime +1 -delete
+                        sudo find /var/tmp -type f -mtime +1 -delete
                         
-                        # Limpeza de cache do apt (para sistemas Debian/Ubuntu)
+                        # Limpeza de cache do apt
                         sudo apt-get clean
                         
                         # Limpeza de logs antigos do systemd
@@ -31,13 +34,19 @@ pipeline {
         stage('Verificar Espaço Após Limpeza') {
             steps {
                 script {
-                    // Captura o espaço em disco após a limpeza
-                    def afterCleanup = sh(script: 'sudo du -sh /tmp /var/tmp', returnStdout: true).trim()
-                    echo "Espaço ocupado após a limpeza:\n${afterCleanup}"
+                    def afterHuman = sh(script: 'sudo du -sh /tmp /var/tmp', returnStdout: true).trim()
+                    echo "Espaço ocupado após a limpeza:\n${afterHuman}"
                     
-                    // Calcula o espaço liberado
-                    def spaceFreed = sh(script: 'sudo du -shc /tmp /var/tmp | grep total | awk \'{print $1}\'', returnStdout: true).trim()
-                    echo "Espaço liberado:\n${spaceFreed}"
+                    // Captura o tamanho atual em KB
+                    def afterKB = sh(script: "sudo du -sk /tmp /var/tmp | awk '{total+=\$1} END {print total}'", returnStdout: true).trim()
+                    
+                    // Realiza o cálculo real de espaço liberado via shell
+                    def savedKB = sh(script: "echo \$((${env.BEFORE_KB} - ${afterKB}))", returnStdout: true).trim()
+                    
+                    // Converte para MegaBytes para exibição amigável
+                    def savedMB = sh(script: "echo | awk '{printf \"%.2f MB\", ${savedKB}/1024}'", returnStdout: true).trim()
+                    
+                    echo "✨ Total de espaço liberado nesta execução: ${savedMB}"
                 }
             }
         }
