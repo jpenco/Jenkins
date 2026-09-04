@@ -1,6 +1,5 @@
 pipeline {
-    agent any
-
+    agent any 
     stages {
         stage('Monitoramento do Servidor') {
             steps {
@@ -15,16 +14,16 @@ pipeline {
                     def processors = sh(script: "nproc", returnStdout: true).trim()
                     echo "⚙️ Processadores: ${processors} núcleos"
                     
-                    // Memória RAM (uso e total)
+                    // Memória RAM (uso e total) - Corrigido escape e cálculo em Megabytes
                     sh '''
                         echo "🧠 Memória RAM:"
-                        free -h | awk '/Mem:/ {printf "Total: %s, Usada: %s (%.1f%%)\\n", $2, $3, $3/$2*100}'
+                        free -m | awk '/Mem:/ {printf "Total: %.1f GB, Usada: %.1f GB (%.1f%%)\\n", \$2/1024, \$3/1024, \$3/\$2*100}'
                     '''
                     
-                    // Espaço em disco (uso e total)
+                    // Espaço em disco (uso e total) - Corrigido escape e cálculo em Kilobytes
                     sh '''
-                        echo "💾 Espaço em Disco:"
-                        df -h --total | grep total | awk '{printf "Total: %s, Usado: %s (%.1f%%)\\n", $2, $3, $3/$2*100}'
+                        echo "💾 Espaço em Disco (Raiz /):"
+                        df -k / | awk 'NR==2 {printf "Total: %.1f GB, Usado: %.1f GB (%.1f%%)\\n", \$2/1024/1024, \$3/1024/1024, \$3/\$2*100}'
                     '''
                     
                     echo "============================"
@@ -32,7 +31,6 @@ pipeline {
             }
         }
     }
-    
     post {
         always {
             echo "✅ Monitoramento concluído com sucesso"
